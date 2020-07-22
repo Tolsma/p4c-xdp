@@ -1,0 +1,43 @@
+name: Create p4c(-xdp) image
+
+on:
+  push:
+    # Publish `p4vswitch` as Docker `latest` image.
+    branches:
+      - p4vswitch
+
+    # Publish `v1.2.3` tags as releases.
+    tags:
+      - v*
+
+    # but not if the base p4c Dockerfile changes!
+    paths-ignore:
+      - 'docker/Dockerfile-p4c-base' 
+
+env:
+  # TODO: Change variable to your image's name.
+  IMAGE_NAME: image
+
+jobs:
+  # Push image to GitHub Packages.
+  # See also https://docs.docker.com/docker-hub/builds/
+  create_image:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Build and push Docker image to Github Package store
+        uses: docker/build-push-action@v1
+        with:
+#          username: ${{ github.actor }}
+#          password: ${{ github.token }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          dockerfile: docker/Dockerfile-p4c
+#          registry: docker.pkg.github.com
+#          repository: tolsma/p4c-xdp/p4c-xdp
+          repository: stolsma/p4c-xdp
+          tags: latest
