@@ -41,11 +41,12 @@ enum xdp_action {
 
 /* architectural model for a packet switch architecture */
 struct xdp_input {
+    bit<32> input_ifindex;
+    bit<32> input_queue;
     bit<32> input_port;
 }
 
 struct xdp_output {
-    xdp_action output_action;
     bit<32> output_port;  // output port for packet
 }
 

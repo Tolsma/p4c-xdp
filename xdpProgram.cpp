@@ -175,56 +175,68 @@ void XDPProgram::emitC(EBPF::CodeBuilder* builder, cstring headerFile) {
         "}\n");
 
     builder->appendLine(
-        "struct bpf_elf_map SEC(\"maps\") perf_event = {\n"
-        "   .type = BPF_MAP_TYPE_PERF_EVENT_ARRAY,\n"
-        "   .size_key = sizeof(u32),\n"
-        "   .size_value = sizeof(u32),\n"
-        "   .pinning = 1,\n"
-        "   .max_elem = 2,\n"
-        "};\n"
-        "#define BPF_PERF_EVENT_OUTPUT() do {\\\n"
-        "    int pktsize = (int)(skb->data_end - skb->data);\\\n"
-        "    bpf_perf_event_output(skb, &perf_event, ((u64)pktsize << 32), &pktsize, 4);\\\n"
-        "} while(0);\n");
-
-    builder->appendLine(
         "#define BPF_KTIME_GET_NS() ({\\\n"
         "   u32 ___ts = (u32)bpf_ktime_get_ns(); ___ts; })\\\n");
 
-    // The table used for forwarding: we write the output in it
-    // TODO: this should use target->emitTableDecl().
-    // We can't do it today because it has a different map type PERCPU_ARRAY
-    builder->emitIndent();
-    builder->appendFormat("struct bpf_elf_map SEC(\"maps\") %s = ", outTableName.c_str());
-    builder->blockStart();
-    builder->emitIndent();
-    builder->append(".type = ");
-    builder->appendLine("BPF_MAP_TYPE_PERCPU_ARRAY,");
+    builder->appendLine(
+        "enum PortType {\n"
+        "    PORT_DROP,\n"
+        "    PORT_DEV,\n"
+        "    PORT_XSK,\n"
+        "    PORT_PASS,\n"
+        "};\n"
+        "\n"
+        "struct dqIdx {\n"
+        "    u32 ifindex;\n"
+        "    u32 queue;\n"
+        "};\n"
+        "\n"
+        "struct portmap {\n"
+        "    u32 type;\n"
+        "    u32 index;\n"
+        "    u32 ifindex;\n"
+        "};\n"
+        "\n"
+        "struct bpf_map_def SEC(\"maps\") dq_table = {\n"
+        "    .type = BPF_MAP_TYPE_HASH,\n"
+        "    .key_size = sizeof(struct dqIdx),\n"
+        "    .value_size = sizeof(u32),\n"
+        "    .max_entries = 256*8 /* At this moment maximum of 256 devs with 8 queues on p4vswitch*/\n"
+        "};\n"
+        "\n"
+        "struct bpf_map_def SEC(\"maps\") port_table = {\n"
+        "    .type = BPF_MAP_TYPE_ARRAY,\n"
+        "    .key_size = sizeof(u32),\n"
+        "    .value_size = sizeof(struct portmap),\n"
+        "    .max_entries = 256 /* At this moment maximum of 256 ports on p4vswitch*/\n"
+        "};\n"
+        "\n"
+        "struct bpf_map_def SEC(\"maps\") dev_table = {\n"
+        "    .type = BPF_MAP_TYPE_DEVMAP,\n"
+        "    .key_size = sizeof(int),\n"
+        "    .value_size = sizeof(int),\n"
+        "    .max_entries = 256 /* At this moment maximum of 256 ports on p4vswitch*/\n"
+        "};\n"
+        "\n"
+        "struct bpf_map_def SEC(\"maps\") xsk_table = {\n"
+        "    .type = BPF_MAP_TYPE_XSKMAP,\n"
+        "    .key_size = sizeof(int),\n"
+        "    .value_size = sizeof(int),\n"
+        "    .max_entries = 256 /* At this moment maximum of 256 ports on p4vswitch*/\n"
+        "};\n");
 
-    builder->emitIndent();
-    builder->append(".size_key = sizeof(u32),");
     builder->newline();
+    builder->emitIndent();
+
+// replace emitCodeSection with own line because p4c-ebpf doesnt use functionName but emits always "prog"
+// and libbpf doesn't like this....
+// see also: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/tools/lib/bpf/libbpf.c #6617
+//
+//    builder->target->emitCodeSection(builder, functionName);
+    builder->appendFormat("SEC(\"%s\")\n", "xdp");
 
     builder->emitIndent();
-    builder->appendFormat(".size_value = sizeof(u32),");
-    builder->newline();
-
-    builder->emitIndent();
-    builder->appendFormat(".pinning = 2, /* PIN_OBJECT_NS */");
-    builder->newline();
-
-    builder->emitIndent();
-    builder->appendFormat(".max_elem = 1 /* No multicast support */");
-    builder->newline();
-
-    builder->blockEnd(false);
-    builder->endOfStatement(true);
-
-    builder->newline();
-    builder->emitIndent();
-    builder->target->emitCodeSection(builder, functionName);
-    builder->emitIndent();
-    builder->target->emitMain(builder, functionName, model.CPacketName.str());
+    builder->target->emitMain(builder, "p4vswitch_prog", model.CPacketName.str());
     builder->blockStart();
 
     emitHeaderInstances(builder);
@@ -245,19 +257,31 @@ void XDPProgram::emitC(EBPF::CodeBuilder* builder, cstring headerFile) {
     builder->append(endLabel);
     builder->appendLine(":");
 
-    // write output port to a table
-    builder->emitIndent();
-    builder->appendFormat("bpf_map_update_elem(&%s, &%s, &%s.%s, BPF_ANY)",
-                          outTableName.c_str(), zeroKey.c_str(),
-                          getSwitch()->outputMeta->name.name,
-                          XDPModel::instance.outputMetadataModel.outputPort.str());
-    builder->endOfStatement(true);
-
-    builder->emitIndent();
-    builder->appendFormat("return %s.%s",
-                          getSwitch()->outputMeta->name.name,
-                          XDPModel::instance.outputMetadataModel.output_action.str());
-    builder->endOfStatement(true);
+    builder->appendLine(
+        "    {\n"
+        "        /* Get output port information */\n"
+        "        struct portmap *rec = bpf_map_lookup_elem(&port_table, &xout.output_port);\n"
+        "        if (!rec) return XDP_ABORTED; /* Satisfy verifier: If not found return abort! */\n"
+        "\n"
+        "        /*  PORT_DEV and same out ifIndex as in ifIndex then XDP_TX: */\n"
+        "        if (rec->type == PORT_DEV && rec->ifindex == xin.input_ifindex) return XDP_TX;\n"
+        "\n"
+        "        /*  PORT_DEV: */\n"
+        "        if (rec->type == PORT_DEV) return bpf_redirect_map(&dev_table, rec->index, 0);\n"
+        "\n"
+        "        /*  PORT_XSK calculate index in xsk_map: */\n"
+        "        if (rec->type == PORT_XSK) {\n"
+        "            int tmp_index = (rec->index*8) + xin.input_queue;\n"
+        "            return bpf_redirect_map(&xsk_table, tmp_index, 0);\n"
+        "        }\n"
+        "\n"
+        "        /*  PORT_PASS the output to input netdev kernel networking interface: */\n"
+        "        /*  (this is the XDP implemention and can't be changed) */\n"
+        "        if (rec->type == PORT_PASS && rec->ifindex == xin.input_ifindex) return XDP_PASS;\n"
+        "\n"
+        "        /* Anything else including PORT_DROP */\n"
+        "        return XDP_DROP;\n"
+        "    }\n");
     builder->blockEnd(true);  // end of function
 
     builder->target->emitLicense(builder, license);
@@ -326,14 +350,28 @@ void XDPProgram::emitLocalVariables(EBPF::CodeBuilder* builder) {
                           getSwitch()->outputMeta->name.name);
     builder->newline();
 
+    builder->newline();
     builder->emitIndent();
-    builder->appendFormat("/* TODO: this should be initialized by the environment. HOW? */");
+    builder->appendFormat("/* Initialize input metadata */");
     builder->newline();
 
     builder->emitIndent();
     builder->appendFormat("struct %s %s;", xdp_model.inputMetadataModel.name,
                           getSwitch()->inputMeta->name.name);
     builder->newline();
+
+    builder->appendLine(
+        "    xin.input_ifindex = skb->ingress_ifindex;\n"
+        "    xin.input_queue = skb->rx_queue_index;\n"
+        "    xin.input_port = 0;\n"
+        "\n"
+        "    /* Retrieve p4vswitch input port*/\n"
+        "    struct dqIdx key = {};\n"
+        "    key.ifindex = xin.input_ifindex;\n"
+        "    key.queue = xin.input_queue;\n"
+        "    u32 *p4port = bpf_map_lookup_elem(&dq_table, &key);\n"
+        "    if (!p4port) return XDP_DROP; /* Satisfy verifier */\n"
+        "    xin.input_port = *p4port;");
 }
 
 XDPSwitch* XDPProgram::getSwitch() const {

@@ -41,22 +41,26 @@ struct XDP_Switch_Model : public ::Model::Elem {
 
 struct InputMetadataModel : public ::Model::Type_Model {
     InputMetadataModel() : ::Model::Type_Model("xdp_input"),
+        inputIfindex("input_ifindex"), inputIfindexType(IR::Type_Bits::get(32)),
+        inputQueue("input_queue"), inputQueueType(IR::Type_Bits::get(32)),
         inputPort("input_port"), inputPortType(IR::Type_Bits::get(32))
     {}
 
+    ::Model::Elem inputIfindex;
+    const IR::Type* inputIfindexType;
+    ::Model::Elem inputQueue;
+    const IR::Type* inputQueueType;
     ::Model::Elem inputPort;
     const IR::Type* inputPortType;
 };
 
 struct OutputMetadataModel : public ::Model::Type_Model {
     OutputMetadataModel() : ::Model::Type_Model("xdp_output"),
-            outputPort("output_port"), outputPortType(IR::Type_Bits::get(32)),
-                            output_action("output_action")
+            outputPort("output_port"), outputPortType(IR::Type_Bits::get(32))
     {}
 
     ::Model::Elem outputPort;
     const IR::Type* outputPortType;
-    ::Model::Elem output_action;
 };
 
 // Keep this in sync with xdp_model.p4
