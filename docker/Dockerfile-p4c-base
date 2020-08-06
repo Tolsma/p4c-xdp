@@ -32,9 +32,9 @@ ENV P4C_PIP_PACKAGES pyroute2 \
                      ply==3.8 \
                      scapy==2.4.0
 
-RUN apt-get update
-RUN apt-get install -y --no-install-recommends $P4C_DEPS
-RUN apt-get install -y --no-install-recommends $P4C_EBPF_DEPS
+RUN DEBIAN_FRONTEND="noninteractive" apt-get update
+RUN DEBIAN_FRONTEND="noninteractive" apt-get install -y --no-install-recommends $P4C_DEPS
+RUN DEBIAN_FRONTEND="noninteractive" apt-get install -y --no-install-recommends $P4C_EBPF_DEPS
 # in some cases wheel is needed to install pip packages
 RUN pip3 install wheel 
 RUN pip3 install $P4C_PIP_PACKAGES
