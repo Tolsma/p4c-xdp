@@ -1,4 +1,4 @@
-FROM ubuntu:bionic
+FROM ubuntu:groovy
 
 WORKDIR /home/
 ENV P4C_DEPS bison \
