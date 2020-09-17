@@ -19,9 +19,8 @@ env:
   IMAGE_NAME: image
 
 jobs:
-  # Push image to GitHub Packages.
-  # See also https://docs.docker.com/docker-hub/builds/
-  create_image:
+  create_and_push_image:
+    name: Build image and push to Dockerhub and Github
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
 
@@ -29,15 +28,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Build and push Docker image to Github Package store
+      - name: Build and push Docker image to Docker hub
         uses: docker/build-push-action@v1
         with:
-#          username: ${{ github.actor }}
-#          password: ${{ github.token }}
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
           dockerfile: docker/Dockerfile-p4c
-#          registry: docker.pkg.github.com
-#          repository: tolsma/p4c-xdp/p4c-xdp
           repository: stolsma/p4c-xdp
+          tags: latest
+
+      - name: Push Docker image to Github Packages
+        uses: docker/build-push-action@v1
+        with:
+          username: ${{ github.actor }}
+          password: ${{ github.PAT }}
+          dockerfile: docker/Dockerfile-p4c
+          registry: ghcr.io
+          repository: tolsma/p4c-xdp
           tags: latest
